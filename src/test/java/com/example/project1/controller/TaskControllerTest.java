@@ -1,0 +1,234 @@
+package com.example.project1.controller;
+
+import com.example.project1.dto.TaskRequestDto;
+import com.example.project1.dto.TaskResponseDto;
+import com.example.project1.enumerations.TaskPriority;
+import com.example.project1.enumerations.TaskStatus;
+import com.example.project1.exception.ResourceNotFoundException;
+import com.example.project1.service.TaskService;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.http.MediaType;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.MockMvc;
+
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+@WebMvcTest(TaskController.class)
+class TaskControllerTest {
+
+    private static final LocalDateTime CREATED_AT = LocalDateTime.of(2026, 1, 15, 10, 30, 45);
+    private static final LocalDate DUE_DATE = LocalDate.of(2026, 2, 1);
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    @MockitoBean
+    private TaskService taskService;
+
+    @Test
+    void create_validRequest_returnsCreatedTask() throws Exception {
+        when(taskService.create(any(TaskRequestDto.class))).thenReturn(response(10L, 1L, "Website"));
+
+        mockMvc.perform(post("/api/projects/1/tasks")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request(null))))
+                // currently 200; CLAUDE.md wants 201 + Location header
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(10))
+                .andExpect(jsonPath("$.title").value("Write tests"))
+                .andExpect(jsonPath("$.description").value("Controller tests"))
+                .andExpect(jsonPath("$.status").value("IN_PROGRESS"))
+                .andExpect(jsonPath("$.priority").value("HIGH"))
+                .andExpect(jsonPath("$.dueDate").value("2026-02-01"))
+                .andExpect(jsonPath("$.assignee").value("alice"))
+                .andExpect(jsonPath("$.projectId").value(1))
+                .andExpect(jsonPath("$.projectName").value("Website"))
+                .andExpect(jsonPath("$.createdAt").value("2026-01-15T10:30:45"));
+    }
+
+    @Test
+    void create_bodyHasDifferentProjectId_usesProjectIdFromPath() throws Exception {
+        when(taskService.create(any(TaskRequestDto.class))).thenReturn(response(10L, 1L, "Website"));
+
+        mockMvc.perform(post("/api/projects/1/tasks")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request(5L))))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<TaskRequestDto> captor = ArgumentCaptor.forClass(TaskRequestDto.class);
+        verify(taskService).create(captor.capture());
+        assertThat(captor.getValue().getProjectId()).isEqualTo(1L);
+    }
+
+    @Test
+    void create_projectNotFound_returnsNotFound() throws Exception {
+        when(taskService.create(any(TaskRequestDto.class)))
+                .thenThrow(new ResourceNotFoundException("Project not found with id: 99"));
+
+        mockMvc.perform(post("/api/projects/99/tasks")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request(null))))
+                .andExpect(status().isNotFound())
+                .andExpect(content().string("Project not found with id: 99"));
+    }
+
+    @Test
+    void create_invalidEnumValue_returnsBadRequest() throws Exception {
+        mockMvc.perform(post("/api/projects/1/tasks")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\": \"Write tests\", \"status\": \"DONE\"}"))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(taskService);
+    }
+
+    @Test
+    void create_malformedJson_returnsBadRequest() throws Exception {
+        mockMvc.perform(post("/api/projects/1/tasks")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\": "))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(taskService);
+    }
+
+    @Test
+    void findByProject_tasksExist_returnsList() throws Exception {
+        when(taskService.findByProject(1L)).thenReturn(List.of(
+                response(10L, 1L, "Website"),
+                response(11L, 1L, "Website")
+        ));
+
+        mockMvc.perform(get("/api/projects/1/tasks"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].id").value(10))
+                .andExpect(jsonPath("$[1].id").value(11))
+                .andExpect(jsonPath("$[0].projectId").value(1));
+    }
+
+    @Test
+    void findByProject_noTasks_returnsEmptyArray() throws Exception {
+        when(taskService.findByProject(1L)).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/projects/1/tasks"))
+                .andExpect(status().isOk())
+                .andExpect(content().json("[]"));
+    }
+
+    @Test
+    void findById_existingId_returnsTask() throws Exception {
+        when(taskService.findById(10L)).thenReturn(response(10L, 1L, "Website"));
+
+        mockMvc.perform(get("/api/tasks/10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(10))
+                .andExpect(jsonPath("$.status").value("IN_PROGRESS"))
+                .andExpect(jsonPath("$.priority").value("HIGH"))
+                .andExpect(jsonPath("$.projectName").value("Website"));
+    }
+
+    @Test
+    void findById_missingId_returnsNotFoundWithMessage() throws Exception {
+        when(taskService.findById(99L))
+                .thenThrow(new ResourceNotFoundException("Task not found with id: 99"));
+
+        mockMvc.perform(get("/api/tasks/99"))
+                .andExpect(status().isNotFound())
+                .andExpect(content().string("Task not found with id: 99"));
+    }
+
+    @Test
+    void findById_nonNumericId_returnsBadRequest() throws Exception {
+        mockMvc.perform(get("/api/tasks/abc"))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(taskService);
+    }
+
+    @Test
+    void update_existingId_returnsUpdatedTask() throws Exception {
+        when(taskService.update(eq(10L), any(TaskRequestDto.class))).thenReturn(response(10L, 2L, "Mobile app"));
+
+        mockMvc.perform(put("/api/tasks/10")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request(2L))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(10))
+                .andExpect(jsonPath("$.projectId").value(2))
+                .andExpect(jsonPath("$.projectName").value("Mobile app"));
+    }
+
+    @Test
+    void update_missingId_returnsNotFound() throws Exception {
+        when(taskService.update(eq(99L), any(TaskRequestDto.class)))
+                .thenThrow(new ResourceNotFoundException("Task not found with id: 99"));
+
+        mockMvc.perform(put("/api/tasks/99")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request(1L))))
+                .andExpect(status().isNotFound())
+                .andExpect(content().string("Task not found with id: 99"));
+    }
+
+    @Test
+    void delete_existingId_returnsSuccess() throws Exception {
+        mockMvc.perform(delete("/api/tasks/10"))
+                // currently 200; CLAUDE.md wants 204 No Content
+                .andExpect(status().isOk())
+                .andExpect(content().string(""));
+
+        verify(taskService).delete(10L);
+    }
+
+    @Test
+    void delete_missingId_returnsNotFound() throws Exception {
+        doThrow(new ResourceNotFoundException("Task not found with id: 99"))
+                .when(taskService).delete(99L);
+
+        mockMvc.perform(delete("/api/tasks/99"))
+                .andExpect(status().isNotFound())
+                .andExpect(content().string("Task not found with id: 99"));
+    }
+
+    private TaskRequestDto request(Long projectId) {
+        TaskRequestDto request = new TaskRequestDto();
+        request.setTitle("Write tests");
+        request.setDescription("Controller tests");
+        request.setStatus(TaskStatus.IN_PROGRESS);
+        request.setPriority(TaskPriority.HIGH);
+        request.setDueDate(DUE_DATE);
+        request.setAssignee("alice");
+        request.setProjectId(projectId);
+        return request;
+    }
+
+    private TaskResponseDto response(Long id, Long projectId, String projectName) {
+        return new TaskResponseDto(id, "Write tests", "Controller tests", TaskStatus.IN_PROGRESS,
+                TaskPriority.HIGH, DUE_DATE, "alice", projectId, projectName, CREATED_AT);
+    }
+}
