@@ -49,6 +49,9 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     public ResponseEntity<ErrorResponseDto> handleTypeMismatch(MethodArgumentTypeMismatchException ex, HttpServletRequest request) {
         String message = "Invalid value '" + ex.getValue() + "' for parameter '" + ex.getName() + "'";
+        if (ex.getRequiredType() != null && ex.getRequiredType().isEnum()) {
+            message += ". Allowed values: " + Arrays.toString(ex.getRequiredType().getEnumConstants());
+        }
         return build(HttpStatus.BAD_REQUEST, message, request, List.of());
     }
 

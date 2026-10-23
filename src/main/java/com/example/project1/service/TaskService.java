@@ -1,6 +1,7 @@
 package com.example.project1.service;
 
 import com.example.project1.dto.PageResponseDto;
+import com.example.project1.dto.TaskFilterDto;
 import com.example.project1.dto.TaskRequestDto;
 import com.example.project1.dto.TaskResponseDto;
 import com.example.project1.exception.ResourceNotFoundException;
@@ -8,6 +9,7 @@ import com.example.project1.model.Project;
 import com.example.project1.model.Task;
 import com.example.project1.repository.ProjectRepository;
 import com.example.project1.repository.TaskRepository;
+import com.example.project1.repository.TaskSpecifications;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
@@ -39,6 +41,11 @@ public class TaskService {
 
     public PageResponseDto<TaskResponseDto> findByProject(Long projectId, Pageable pageable) {
         return new PageResponseDto<>(taskRepository.findByProjectId(projectId, pageable).map(this::toResponseDto));
+    }
+
+    public PageResponseDto<TaskResponseDto> findAll(TaskFilterDto filter, Pageable pageable) {
+        return new PageResponseDto<>(
+                taskRepository.findAll(TaskSpecifications.fromFilter(filter), pageable).map(this::toResponseDto));
     }
 
     public TaskResponseDto findById(Long id) {

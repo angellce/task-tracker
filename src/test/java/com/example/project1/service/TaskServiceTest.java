@@ -1,6 +1,7 @@
 package com.example.project1.service;
 
 import com.example.project1.dto.PageResponseDto;
+import com.example.project1.dto.TaskFilterDto;
 import com.example.project1.dto.TaskRequestDto;
 import com.example.project1.dto.TaskResponseDto;
 import com.example.project1.enumerations.TaskPriority;
@@ -13,6 +14,7 @@ import com.example.project1.repository.TaskRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -21,6 +23,7 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -30,6 +33,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -202,7 +206,7 @@ class TaskServiceTest {
         assertThatThrownBy(() -> taskService.delete(99L))
                 .isInstanceOf(ResourceNotFoundException.class)
                 .hasMessage("Task not found with id: 99");
-        verify(taskRepository, never()).delete(any());
+        verify(taskRepository, never()).delete(any(Task.class));
     }
 
     @Test
@@ -222,6 +226,24 @@ class TaskServiceTest {
         assertThat(result.getSize()).isEqualTo(2);
         assertThat(result.getTotalElements()).isEqualTo(3);
         assertThat(result.getTotalPages()).isEqualTo(2);
+    }
+
+    @Test
+    void findAll_withFilter_queriesRepositoryWithPageableAndMapsPage() {
+        Project project = project(1L, "Website");
+        Pageable pageable = PageRequest.of(0, 20, Sort.by("id"));
+        Page<Task> page = new PageImpl<>(List.of(task(10L, project)), pageable, 1);
+        when(taskRepository.findAll(ArgumentMatchers.<Specification<Task>>any(), eq(pageable))).thenReturn(page);
+
+        // the filtering itself is tested against a real database in TaskRepositoryTest
+        PageResponseDto<TaskResponseDto> result = taskService.findAll(
+                new TaskFilterDto(TaskStatus.TODO, TaskPriority.HIGH, 1L, "alice", NEW_DUE_DATE), pageable);
+
+        assertThat(result.getContent()).hasSize(1);
+        assertThat(result.getContent().get(0).getId()).isEqualTo(10L);
+        assertThat(result.getContent().get(0).getProjectName()).isEqualTo("Website");
+        assertThat(result.getTotalElements()).isEqualTo(1);
+        verify(taskRepository).findAll(ArgumentMatchers.<Specification<Task>>any(), eq(pageable));
     }
 
     @Test

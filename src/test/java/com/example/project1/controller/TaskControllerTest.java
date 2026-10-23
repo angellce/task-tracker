@@ -1,6 +1,7 @@
 package com.example.project1.controller;
 
 import com.example.project1.dto.PageResponseDto;
+import com.example.project1.dto.TaskFilterDto;
 import com.example.project1.dto.TaskRequestDto;
 import com.example.project1.dto.TaskResponseDto;
 import com.example.project1.enumerations.TaskPriority;
@@ -337,6 +338,97 @@ class TaskControllerTest {
         mockMvc.perform(get("/api/projects/1/tasks").param("sort", "foo"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("Invalid sort property 'foo'"));
+    }
+
+    @Test
+    void findAll_allFiltersGiven_passesThemToService() throws Exception {
+        when(taskService.findAll(any(TaskFilterDto.class), any(Pageable.class)))
+                .thenReturn(new PageResponseDto<>(new PageImpl<>(List.of(response(10L, 1L, "Website")),
+                        PageRequest.of(0, 10), 1)));
+
+        mockMvc.perform(get("/api/tasks")
+                        .param("status", "TODO")
+                        .param("priority", "HIGH")
+                        .param("projectId", "1")
+                        .param("assignee", "alice")
+                        .param("dueBefore", "2026-12-01")
+                        .param("size", "10")
+                        .param("sort", "dueDate,desc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].id").value(10))
+                .andExpect(jsonPath("$.totalElements").value(1));
+
+        ArgumentCaptor<TaskFilterDto> filterCaptor = ArgumentCaptor.forClass(TaskFilterDto.class);
+        ArgumentCaptor<Pageable> pageableCaptor = ArgumentCaptor.forClass(Pageable.class);
+        verify(taskService).findAll(filterCaptor.capture(), pageableCaptor.capture());
+        TaskFilterDto filter = filterCaptor.getValue();
+        assertThat(filter.getStatus()).isEqualTo(TaskStatus.TODO);
+        assertThat(filter.getPriority()).isEqualTo(TaskPriority.HIGH);
+        assertThat(filter.getProjectId()).isEqualTo(1L);
+        assertThat(filter.getAssignee()).isEqualTo("alice");
+        assertThat(filter.getDueBefore()).isEqualTo(LocalDate.of(2026, 12, 1));
+        assertThat(pageableCaptor.getValue().getPageSize()).isEqualTo(10);
+        assertThat(pageableCaptor.getValue().getSort()).isEqualTo(Sort.by(Sort.Direction.DESC, "dueDate"));
+    }
+
+    @Test
+    void findAll_noParameters_passesEmptyFilterAndDefaultPage() throws Exception {
+        when(taskService.findAll(any(TaskFilterDto.class), any(Pageable.class)))
+                .thenReturn(new PageResponseDto<>(Page.empty(PageRequest.of(0, 20))));
+
+        mockMvc.perform(get("/api/tasks"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<TaskFilterDto> filterCaptor = ArgumentCaptor.forClass(TaskFilterDto.class);
+        ArgumentCaptor<Pageable> pageableCaptor = ArgumentCaptor.forClass(Pageable.class);
+        verify(taskService).findAll(filterCaptor.capture(), pageableCaptor.capture());
+        TaskFilterDto filter = filterCaptor.getValue();
+        assertThat(filter.getStatus()).isNull();
+        assertThat(filter.getPriority()).isNull();
+        assertThat(filter.getProjectId()).isNull();
+        assertThat(filter.getAssignee()).isNull();
+        assertThat(filter.getDueBefore()).isNull();
+        assertThat(pageableCaptor.getValue().getPageSize()).isEqualTo(20);
+        assertThat(pageableCaptor.getValue().getSort()).isEqualTo(Sort.by("id"));
+    }
+
+    @Test
+    void findAll_invalidStatus_returnsBadRequestWithAllowedValues() throws Exception {
+        mockMvc.perform(get("/api/tasks").param("status", "DONE"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message")
+                        .value("Invalid value 'DONE' for parameter 'status'. Allowed values: [TODO, IN_PROGRESS, COMPLETED]"));
+
+        verifyNoInteractions(taskService);
+    }
+
+    @Test
+    void findAll_invalidPriority_returnsBadRequestWithAllowedValues() throws Exception {
+        mockMvc.perform(get("/api/tasks").param("priority", "URGENT"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message")
+                        .value("Invalid value 'URGENT' for parameter 'priority'. Allowed values: [HIGH, MEDIUM, LOW]"));
+
+        verifyNoInteractions(taskService);
+    }
+
+    @Test
+    void findAll_invalidDueBefore_returnsBadRequest() throws Exception {
+        mockMvc.perform(get("/api/tasks").param("dueBefore", "not-a-date"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Invalid value 'not-a-date' for parameter 'dueBefore'"));
+
+        verifyNoInteractions(taskService);
+    }
+
+    @Test
+    void findAll_nonNumericProjectId_returnsBadRequest() throws Exception {
+        mockMvc.perform(get("/api/tasks").param("projectId", "abc"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Invalid value 'abc' for parameter 'projectId'"));
+
+        verifyNoInteractions(taskService);
     }
 
     @Test
