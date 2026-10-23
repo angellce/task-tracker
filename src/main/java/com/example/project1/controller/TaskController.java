@@ -4,6 +4,7 @@ import com.example.project1.dto.TaskRequestDto;
 import com.example.project1.dto.TaskResponseDto;
 import com.example.project1.model.Task;
 import com.example.project1.service.TaskService;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -18,7 +19,7 @@ public class TaskController {
     }
 
     @PostMapping("/api/projects/{projectId}/tasks")
-    public TaskResponseDto create(@PathVariable Long projectId, @RequestBody TaskRequestDto request){
+    public TaskResponseDto create(@PathVariable Long projectId, @Valid @RequestBody TaskRequestDto request){
         request.setProjectId(projectId);
         return taskService.create(request);
     }
@@ -34,7 +35,7 @@ public class TaskController {
     }
 
     @PutMapping("/api/tasks/{id}")
-    public TaskResponseDto update(@PathVariable Long id, @RequestBody TaskRequestDto request){
+    public TaskResponseDto update(@PathVariable Long id, @Valid @RequestBody TaskRequestDto request){
         return taskService.update(id, request);
     }
 

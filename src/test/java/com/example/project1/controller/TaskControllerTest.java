@@ -20,6 +20,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
@@ -38,7 +39,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class TaskControllerTest {
 
     private static final LocalDateTime CREATED_AT = LocalDateTime.of(2026, 1, 15, 10, 30, 45);
-    private static final LocalDate DUE_DATE = LocalDate.of(2026, 2, 1);
+    // far in the future so @Future validation keeps passing
+    private static final LocalDate DUE_DATE = LocalDate.of(2099, 2, 1);
 
     @Autowired
     private MockMvc mockMvc;
@@ -63,7 +65,7 @@ class TaskControllerTest {
                 .andExpect(jsonPath("$.description").value("Controller tests"))
                 .andExpect(jsonPath("$.status").value("IN_PROGRESS"))
                 .andExpect(jsonPath("$.priority").value("HIGH"))
-                .andExpect(jsonPath("$.dueDate").value("2026-02-01"))
+                .andExpect(jsonPath("$.dueDate").value("2099-02-01"))
                 .andExpect(jsonPath("$.assignee").value("alice"))
                 .andExpect(jsonPath("$.projectId").value(1))
                 .andExpect(jsonPath("$.projectName").value("Website"))
@@ -93,7 +95,8 @@ class TaskControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request(null))))
                 .andExpect(status().isNotFound())
-                .andExpect(content().string("Project not found with id: 99"));
+                .andExpect(jsonPath("$.status").value(404))
+                .andExpect(jsonPath("$.message").value("Project not found with id: 99"));
     }
 
     @Test
@@ -101,7 +104,10 @@ class TaskControllerTest {
         mockMvc.perform(post("/api/projects/1/tasks")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"title\": \"Write tests\", \"status\": \"DONE\"}"))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message")
+                        .value("Invalid value 'DONE' for field 'status'. Allowed values: [TODO, IN_PROGRESS, COMPLETED]"));
 
         verifyNoInteractions(taskService);
     }
@@ -111,7 +117,134 @@ class TaskControllerTest {
         mockMvc.perform(post("/api/projects/1/tasks")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"title\": "))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Malformed JSON request"));
+
+        verifyNoInteractions(taskService);
+    }
+
+    @Test
+    void create_textFieldsTooLong_returnsBadRequestWithFieldErrors() throws Exception {
+        TaskRequestDto request = request(null);
+        request.setTitle("a".repeat(256));
+        request.setDescription("b".repeat(256));
+        request.setAssignee("c".repeat(256));
+
+        mockMvc.perform(post("/api/projects/1/tasks")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Validation failed"))
+                .andExpect(jsonPath("$.fieldErrors.length()").value(3))
+                .andExpect(jsonPath("$.fieldErrors[*].field", containsInAnyOrder("title", "description", "assignee")));
+
+        verifyNoInteractions(taskService);
+    }
+
+    @Test
+    void create_blankTitle_returnsBadRequestWithFieldError() throws Exception {
+        TaskRequestDto request = request(null);
+        request.setTitle("   ");
+
+        mockMvc.perform(post("/api/projects/1/tasks")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.length()").value(1))
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("title"))
+                .andExpect(jsonPath("$.fieldErrors[0].message").value("must not be blank"));
+
+        verifyNoInteractions(taskService);
+    }
+
+    @Test
+    void create_missingTitle_returnsBadRequest() throws Exception {
+        mockMvc.perform(post("/api/projects/1/tasks")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"description\": \"No title\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("title"));
+
+        verifyNoInteractions(taskService);
+    }
+
+    @Test
+    void create_dueDateInPast_returnsBadRequestWithFieldError() throws Exception {
+        TaskRequestDto request = request(null);
+        request.setDueDate(LocalDate.now().minusDays(1));
+
+        mockMvc.perform(post("/api/projects/1/tasks")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("dueDate"))
+                .andExpect(jsonPath("$.fieldErrors[0].message").value("must be a future date"));
+
+        verifyNoInteractions(taskService);
+    }
+
+    @Test
+    void create_dueDateToday_returnsBadRequest() throws Exception {
+        TaskRequestDto request = request(null);
+        request.setDueDate(LocalDate.now());
+
+        mockMvc.perform(post("/api/projects/1/tasks")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("dueDate"));
+
+        verifyNoInteractions(taskService);
+    }
+
+    @Test
+    void create_noDueDate_returnsOk() throws Exception {
+        TaskRequestDto request = request(null);
+        request.setDueDate(null);
+        when(taskService.create(any(TaskRequestDto.class))).thenReturn(response(10L, 1L, "Website"));
+
+        mockMvc.perform(post("/api/projects/1/tasks")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void update_dueDateInPast_returnsBadRequest() throws Exception {
+        TaskRequestDto request = request(1L);
+        request.setDueDate(LocalDate.now().minusDays(1));
+
+        mockMvc.perform(put("/api/tasks/10")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("dueDate"));
+
+        verifyNoInteractions(taskService);
+    }
+
+    @Test
+    void update_titleTooLong_returnsBadRequest() throws Exception {
+        TaskRequestDto request = request(1L);
+        request.setTitle("a".repeat(256));
+
+        mockMvc.perform(put("/api/tasks/10")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("title"));
+
+        verifyNoInteractions(taskService);
+    }
+
+    @Test
+    void update_invalidPriority_returnsBadRequest() throws Exception {
+        mockMvc.perform(put("/api/tasks/10")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\": \"Write tests\", \"priority\": \"URGENT\", \"projectId\": 1}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message")
+                        .value("Invalid value 'URGENT' for field 'priority'. Allowed values: [HIGH, MEDIUM, LOW]"));
 
         verifyNoInteractions(taskService);
     }
@@ -159,13 +292,15 @@ class TaskControllerTest {
 
         mockMvc.perform(get("/api/tasks/99"))
                 .andExpect(status().isNotFound())
-                .andExpect(content().string("Task not found with id: 99"));
+                .andExpect(jsonPath("$.status").value(404))
+                .andExpect(jsonPath("$.message").value("Task not found with id: 99"));
     }
 
     @Test
     void findById_nonNumericId_returnsBadRequest() throws Exception {
         mockMvc.perform(get("/api/tasks/abc"))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Invalid value 'abc' for parameter 'id'"));
 
         verifyNoInteractions(taskService);
     }
@@ -192,7 +327,8 @@ class TaskControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request(1L))))
                 .andExpect(status().isNotFound())
-                .andExpect(content().string("Task not found with id: 99"));
+                .andExpect(jsonPath("$.status").value(404))
+                .andExpect(jsonPath("$.message").value("Task not found with id: 99"));
     }
 
     @Test
@@ -212,7 +348,8 @@ class TaskControllerTest {
 
         mockMvc.perform(delete("/api/tasks/99"))
                 .andExpect(status().isNotFound())
-                .andExpect(content().string("Task not found with id: 99"));
+                .andExpect(jsonPath("$.status").value(404))
+                .andExpect(jsonPath("$.message").value("Task not found with id: 99"));
     }
 
     private TaskRequestDto request(Long projectId) {

@@ -15,6 +15,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.time.LocalDateTime;
 import java.util.List;
 
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
@@ -64,9 +66,78 @@ class ProjectControllerTest {
         mockMvc.perform(post("/api/projects")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\": "))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message").value("Malformed JSON request"))
+                .andExpect(jsonPath("$.path").value("/api/projects"));
 
         verifyNoInteractions(projectService);
+    }
+
+    @Test
+    void create_blankName_returnsBadRequestWithFieldError() throws Exception {
+        mockMvc.perform(post("/api/projects")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request("   ", "Company site"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.error").value("Bad Request"))
+                .andExpect(jsonPath("$.message").value("Validation failed"))
+                .andExpect(jsonPath("$.fieldErrors.length()").value(1))
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("name"))
+                .andExpect(jsonPath("$.fieldErrors[0].message").value("must not be blank"));
+
+        verifyNoInteractions(projectService);
+    }
+
+    @Test
+    void create_missingName_returnsBadRequest() throws Exception {
+        mockMvc.perform(post("/api/projects")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"description\": \"Company site\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("name"));
+
+        verifyNoInteractions(projectService);
+    }
+
+    @Test
+    void create_nameAndDescriptionTooLong_returnsBadRequestWithBothFieldErrors() throws Exception {
+        mockMvc.perform(post("/api/projects")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request("a".repeat(256), "b".repeat(256)))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.length()").value(2))
+                .andExpect(jsonPath("$.fieldErrors[?(@.field == 'name')].message").value("size must be between 0 and 255"))
+                .andExpect(jsonPath("$.fieldErrors[?(@.field == 'description')].message").value("size must be between 0 and 255"));
+
+        verifyNoInteractions(projectService);
+    }
+
+    @Test
+    void create_nameExactly255Characters_returnsOk() throws Exception {
+        when(projectService.create(any(ProjectRequestDto.class)))
+                .thenReturn(new ProjectResponseDto(1L, "a".repeat(255), null, CREATED_AT));
+
+        mockMvc.perform(post("/api/projects")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request("a".repeat(255), null))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void create_unexpectedServiceError_returnsInternalServerErrorWithoutDetails() throws Exception {
+        when(projectService.create(any(ProjectRequestDto.class)))
+                .thenThrow(new IllegalStateException("database password is secret123"));
+
+        mockMvc.perform(post("/api/projects")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request("Website", "Company site"))))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.status").value(500))
+                .andExpect(jsonPath("$.message").value("Unexpected error"))
+                .andExpect(jsonPath("$.trace").doesNotExist())
+                .andExpect(content().string(not(containsString("secret123"))));
     }
 
     @Test
@@ -114,13 +185,15 @@ class ProjectControllerTest {
 
         mockMvc.perform(get("/api/projects/99"))
                 .andExpect(status().isNotFound())
-                .andExpect(content().string("Project not found with id: 99"));
+                .andExpect(jsonPath("$.status").value(404))
+                .andExpect(jsonPath("$.message").value("Project not found with id: 99"));
     }
 
     @Test
     void findById_nonNumericId_returnsBadRequest() throws Exception {
         mockMvc.perform(get("/api/projects/abc"))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Invalid value 'abc' for parameter 'id'"));
 
         verifyNoInteractions(projectService);
     }
@@ -148,7 +221,8 @@ class ProjectControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request("New name", "New description"))))
                 .andExpect(status().isNotFound())
-                .andExpect(content().string("Project not found with id: 99"));
+                .andExpect(jsonPath("$.status").value(404))
+                .andExpect(jsonPath("$.message").value("Project not found with id: 99"));
     }
 
     @Test
@@ -168,7 +242,8 @@ class ProjectControllerTest {
 
         mockMvc.perform(delete("/api/projects/99"))
                 .andExpect(status().isNotFound())
-                .andExpect(content().string("Project not found with id: 99"));
+                .andExpect(jsonPath("$.status").value(404))
+                .andExpect(jsonPath("$.message").value("Project not found with id: 99"));
     }
 
     private ProjectRequestDto request(String name, String description) {

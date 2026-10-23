@@ -3,6 +3,7 @@ package com.example.project1.controller;
 import com.example.project1.dto.ProjectRequestDto;
 import com.example.project1.dto.ProjectResponseDto;
 import com.example.project1.service.ProjectService;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -18,7 +19,7 @@ public class ProjectController {
     }
 
     @PostMapping
-    public ProjectResponseDto create(@RequestBody ProjectRequestDto request){
+    public ProjectResponseDto create(@Valid @RequestBody ProjectRequestDto request){
         return projectService.create(request);
     }
 
@@ -38,7 +39,7 @@ public class ProjectController {
     }
 
     @PutMapping("{id}")
-    public ProjectResponseDto update(@PathVariable Long id, @RequestBody ProjectRequestDto projectRequestDto){
+    public ProjectResponseDto update(@PathVariable Long id, @Valid @RequestBody ProjectRequestDto projectRequestDto){
         return projectService.update(id, projectRequestDto);
     }
 
