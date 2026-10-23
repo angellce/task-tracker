@@ -1,5 +1,6 @@
 package com.example.project1.service;
 
+import com.example.project1.dto.PageResponseDto;
 import com.example.project1.dto.TaskRequestDto;
 import com.example.project1.dto.TaskResponseDto;
 import com.example.project1.enumerations.TaskPriority;
@@ -15,6 +16,11 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -200,25 +206,33 @@ class TaskServiceTest {
     }
 
     @Test
-    void findByProject_tasksExist_returnsMappedDtos() {
+    void findByProject_tasksExist_returnsMappedPage() {
         Project project = project(1L, "Website");
-        when(taskRepository.findByProjectId(1L)).thenReturn(List.of(task(10L, project), task(11L, project)));
+        Pageable pageable = PageRequest.of(0, 2, Sort.by("dueDate"));
+        Page<Task> page = new PageImpl<>(List.of(task(10L, project), task(11L, project)), pageable, 3);
+        when(taskRepository.findByProjectId(1L, pageable)).thenReturn(page);
 
-        List<TaskResponseDto> result = taskService.findByProject(1L);
+        PageResponseDto<TaskResponseDto> result = taskService.findByProject(1L, pageable);
 
-        assertThat(result).hasSize(2);
-        assertThat(result.get(0).getId()).isEqualTo(10L);
-        assertThat(result.get(1).getId()).isEqualTo(11L);
-        assertThat(result).allSatisfy(dto -> assertThat(dto.getProjectId()).isEqualTo(1L));
+        assertThat(result.getContent()).hasSize(2);
+        assertThat(result.getContent().get(0).getId()).isEqualTo(10L);
+        assertThat(result.getContent().get(1).getId()).isEqualTo(11L);
+        assertThat(result.getContent()).allSatisfy(dto -> assertThat(dto.getProjectId()).isEqualTo(1L));
+        assertThat(result.getPage()).isZero();
+        assertThat(result.getSize()).isEqualTo(2);
+        assertThat(result.getTotalElements()).isEqualTo(3);
+        assertThat(result.getTotalPages()).isEqualTo(2);
     }
 
     @Test
-    void findByProject_noTasks_returnsEmptyList() {
-        when(taskRepository.findByProjectId(1L)).thenReturn(List.of());
+    void findByProject_noTasks_returnsEmptyPage() {
+        Pageable pageable = PageRequest.of(0, 20);
+        when(taskRepository.findByProjectId(1L, pageable)).thenReturn(Page.empty(pageable));
 
-        List<TaskResponseDto> result = taskService.findByProject(1L);
+        PageResponseDto<TaskResponseDto> result = taskService.findByProject(1L, pageable);
 
-        assertThat(result).isEmpty();
+        assertThat(result.getContent()).isEmpty();
+        assertThat(result.getTotalElements()).isZero();
     }
 
     // request values differ from task(...) values, so a field the service forgets to copy is caught

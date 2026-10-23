@@ -1,13 +1,14 @@
 package com.example.project1.controller;
 
+import com.example.project1.dto.PageResponseDto;
 import com.example.project1.dto.TaskRequestDto;
 import com.example.project1.dto.TaskResponseDto;
 import com.example.project1.model.Task;
 import com.example.project1.service.TaskService;
 import jakarta.validation.Valid;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.List;
 
 @RestController
 public class TaskController {
@@ -25,8 +26,9 @@ public class TaskController {
     }
 
     @GetMapping("/api/projects/{projectId}/tasks")
-    public List<TaskResponseDto> findByProject(@PathVariable Long projectId){
-        return taskService.findByProject(projectId);
+    public PageResponseDto<TaskResponseDto> findByProject(@PathVariable Long projectId,
+                                                          @PageableDefault(size = 20, sort = "id") Pageable pageable){
+        return taskService.findByProject(projectId, pageable);
     }
 
     @GetMapping("/api/tasks/{id}")

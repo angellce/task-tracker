@@ -1,5 +1,6 @@
 package com.example.project1.service;
 
+import com.example.project1.dto.PageResponseDto;
 import com.example.project1.dto.ProjectRequestDto;
 import com.example.project1.dto.ProjectResponseDto;
 import com.example.project1.exception.ResourceNotFoundException;
@@ -11,6 +12,11 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -57,29 +63,38 @@ class ProjectServiceTest {
     }
 
     @Test
-    void findAll_projectsExist_returnsMappedDtos() {
-        when(projectRepository.findAll()).thenReturn(List.of(
-                project(1L, "Website", "Company site"),
-                project(2L, "Mobile app", null)
-        ));
+    void findAll_projectsExist_returnsMappedPage() {
+        // page 1 of size 2, with 5 projects in total
+        Pageable pageable = PageRequest.of(1, 2, Sort.by("name"));
+        Page<Project> page = new PageImpl<>(List.of(
+                project(3L, "Website", "Company site"),
+                project(4L, "Mobile app", null)
+        ), pageable, 5);
+        when(projectRepository.findAll(pageable)).thenReturn(page);
 
-        List<ProjectResponseDto> result = projectService.findAll();
+        PageResponseDto<ProjectResponseDto> result = projectService.findAll(pageable);
 
-        assertThat(result).hasSize(2);
-        assertThat(result.get(0).getId()).isEqualTo(1L);
-        assertThat(result.get(0).getName()).isEqualTo("Website");
-        assertThat(result.get(1).getId()).isEqualTo(2L);
-        assertThat(result.get(1).getName()).isEqualTo("Mobile app");
-        assertThat(result.get(1).getDescription()).isNull();
+        assertThat(result.getContent()).hasSize(2);
+        assertThat(result.getContent().get(0).getId()).isEqualTo(3L);
+        assertThat(result.getContent().get(0).getName()).isEqualTo("Website");
+        assertThat(result.getContent().get(1).getId()).isEqualTo(4L);
+        assertThat(result.getContent().get(1).getDescription()).isNull();
+        assertThat(result.getPage()).isEqualTo(1);
+        assertThat(result.getSize()).isEqualTo(2);
+        assertThat(result.getTotalElements()).isEqualTo(5);
+        assertThat(result.getTotalPages()).isEqualTo(3);
     }
 
     @Test
-    void findAll_noProjects_returnsEmptyList() {
-        when(projectRepository.findAll()).thenReturn(List.of());
+    void findAll_noProjects_returnsEmptyPage() {
+        Pageable pageable = PageRequest.of(0, 20);
+        when(projectRepository.findAll(pageable)).thenReturn(Page.empty(pageable));
 
-        List<ProjectResponseDto> result = projectService.findAll();
+        PageResponseDto<ProjectResponseDto> result = projectService.findAll(pageable);
 
-        assertThat(result).isEmpty();
+        assertThat(result.getContent()).isEmpty();
+        assertThat(result.getTotalElements()).isZero();
+        assertThat(result.getTotalPages()).isZero();
     }
 
     @Test

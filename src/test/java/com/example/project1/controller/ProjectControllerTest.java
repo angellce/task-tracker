@@ -1,13 +1,23 @@
 package com.example.project1.controller;
 
+import com.example.project1.dto.PageResponseDto;
 import com.example.project1.dto.ProjectRequestDto;
 import com.example.project1.dto.ProjectResponseDto;
 import com.example.project1.exception.ResourceNotFoundException;
+import com.example.project1.model.Project;
 import com.example.project1.service.ProjectService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.mapping.PropertyReferenceException;
+import org.springframework.data.util.TypeInformation;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -15,6 +25,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.time.LocalDateTime;
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
@@ -141,28 +152,86 @@ class ProjectControllerTest {
     }
 
     @Test
-    void findAll_projectsExist_returnsList() throws Exception {
-        when(projectService.findAll()).thenReturn(List.of(
+    void findAll_projectsExist_returnsPage() throws Exception {
+        Pageable pageable = PageRequest.of(0, 20, Sort.by("id"));
+        when(projectService.findAll(any(Pageable.class))).thenReturn(new PageResponseDto<>(new PageImpl<>(List.of(
                 new ProjectResponseDto(1L, "Website", "Company site", CREATED_AT),
                 new ProjectResponseDto(2L, "Mobile app", null, CREATED_AT)
-        ));
+        ), pageable, 2)));
 
         mockMvc.perform(get("/api/projects"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(2))
-                .andExpect(jsonPath("$[0].id").value(1))
-                .andExpect(jsonPath("$[0].name").value("Website"))
-                .andExpect(jsonPath("$[1].id").value(2))
-                .andExpect(jsonPath("$[1].name").value("Mobile app"));
+                .andExpect(jsonPath("$.content.length()").value(2))
+                .andExpect(jsonPath("$.content[0].id").value(1))
+                .andExpect(jsonPath("$.content[0].name").value("Website"))
+                .andExpect(jsonPath("$.content[1].id").value(2))
+                .andExpect(jsonPath("$.content[1].name").value("Mobile app"))
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(20))
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.totalPages").value(1));
     }
 
     @Test
-    void findAll_noProjects_returnsEmptyArray() throws Exception {
-        when(projectService.findAll()).thenReturn(List.of());
+    void findAll_noProjects_returnsEmptyPage() throws Exception {
+        when(projectService.findAll(any(Pageable.class)))
+                .thenReturn(new PageResponseDto<>(Page.empty(PageRequest.of(0, 20))));
 
         mockMvc.perform(get("/api/projects"))
                 .andExpect(status().isOk())
-                .andExpect(content().json("[]"));
+                .andExpect(jsonPath("$.content").isEmpty())
+                .andExpect(jsonPath("$.totalElements").value(0));
+    }
+
+    @Test
+    void findAll_noParameters_usesDefaultPageSizeAndSortById() throws Exception {
+        when(projectService.findAll(any(Pageable.class)))
+                .thenReturn(new PageResponseDto<>(Page.empty(PageRequest.of(0, 20))));
+
+        mockMvc.perform(get("/api/projects"))
+                .andExpect(status().isOk());
+
+        Pageable pageable = capturePageable();
+        assertThat(pageable.getPageNumber()).isZero();
+        assertThat(pageable.getPageSize()).isEqualTo(20);
+        assertThat(pageable.getSort()).isEqualTo(Sort.by("id"));
+    }
+
+    @Test
+    void findAll_pageSizeAndSortGiven_passesThemToService() throws Exception {
+        when(projectService.findAll(any(Pageable.class)))
+                .thenReturn(new PageResponseDto<>(Page.empty(PageRequest.of(2, 5))));
+
+        mockMvc.perform(get("/api/projects").param("page", "2").param("size", "5").param("sort", "name,desc"))
+                .andExpect(status().isOk());
+
+        Pageable pageable = capturePageable();
+        assertThat(pageable.getPageNumber()).isEqualTo(2);
+        assertThat(pageable.getPageSize()).isEqualTo(5);
+        assertThat(pageable.getSort()).isEqualTo(Sort.by(Sort.Direction.DESC, "name"));
+    }
+
+    @Test
+    void findAll_sizeAboveMaximum_isCappedAt100() throws Exception {
+        when(projectService.findAll(any(Pageable.class)))
+                .thenReturn(new PageResponseDto<>(Page.empty(PageRequest.of(0, 100))));
+
+        mockMvc.perform(get("/api/projects").param("size", "500"))
+                .andExpect(status().isOk());
+
+        assertThat(capturePageable().getPageSize()).isEqualTo(100);
+    }
+
+    @Test
+    void findAll_invalidSortProperty_returnsBadRequest() throws Exception {
+        // with a mocked service the real query never runs, so the mock throws what Spring Data would throw
+        when(projectService.findAll(any(Pageable.class)))
+                .thenThrow(new PropertyReferenceException("foo", TypeInformation.of(Project.class), List.of()));
+
+        mockMvc.perform(get("/api/projects").param("sort", "foo"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message").value("Invalid sort property 'foo'"));
     }
 
     @Test
@@ -244,6 +313,12 @@ class ProjectControllerTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.status").value(404))
                 .andExpect(jsonPath("$.message").value("Project not found with id: 99"));
+    }
+
+    private Pageable capturePageable() {
+        ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
+        verify(projectService).findAll(captor.capture());
+        return captor.getValue();
     }
 
     private ProjectRequestDto request(String name, String description) {

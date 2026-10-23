@@ -1,12 +1,13 @@
 package com.example.project1.controller;
 
+import com.example.project1.dto.PageResponseDto;
 import com.example.project1.dto.ProjectRequestDto;
 import com.example.project1.dto.ProjectResponseDto;
 import com.example.project1.service.ProjectService;
 import jakarta.validation.Valid;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.List;
 
 @RestController
 @RequestMapping("/api/projects")
@@ -24,8 +25,8 @@ public class ProjectController {
     }
 
     @GetMapping
-    public List<ProjectResponseDto> findAll(){
-        return projectService.findAll();
+    public PageResponseDto<ProjectResponseDto> findAll(@PageableDefault(size = 20, sort = "id") Pageable pageable){
+        return projectService.findAll(pageable);
     }
 
     @GetMapping("{id}")

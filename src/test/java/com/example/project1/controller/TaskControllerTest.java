@@ -1,16 +1,25 @@
 package com.example.project1.controller;
 
+import com.example.project1.dto.PageResponseDto;
 import com.example.project1.dto.TaskRequestDto;
 import com.example.project1.dto.TaskResponseDto;
 import com.example.project1.enumerations.TaskPriority;
 import com.example.project1.enumerations.TaskStatus;
 import com.example.project1.exception.ResourceNotFoundException;
+import com.example.project1.model.Task;
 import com.example.project1.service.TaskService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.mapping.PropertyReferenceException;
+import org.springframework.data.util.TypeInformation;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -250,27 +259,84 @@ class TaskControllerTest {
     }
 
     @Test
-    void findByProject_tasksExist_returnsList() throws Exception {
-        when(taskService.findByProject(1L)).thenReturn(List.of(
+    void findByProject_tasksExist_returnsPage() throws Exception {
+        Pageable pageable = PageRequest.of(0, 2, Sort.by("id"));
+        when(taskService.findByProject(eq(1L), any(Pageable.class))).thenReturn(new PageResponseDto<>(new PageImpl<>(List.of(
                 response(10L, 1L, "Website"),
                 response(11L, 1L, "Website")
-        ));
+        ), pageable, 3)));
 
-        mockMvc.perform(get("/api/projects/1/tasks"))
+        mockMvc.perform(get("/api/projects/1/tasks").param("size", "2"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(2))
-                .andExpect(jsonPath("$[0].id").value(10))
-                .andExpect(jsonPath("$[1].id").value(11))
-                .andExpect(jsonPath("$[0].projectId").value(1));
+                .andExpect(jsonPath("$.content.length()").value(2))
+                .andExpect(jsonPath("$.content[0].id").value(10))
+                .andExpect(jsonPath("$.content[1].id").value(11))
+                .andExpect(jsonPath("$.content[0].projectId").value(1))
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(2))
+                .andExpect(jsonPath("$.totalElements").value(3))
+                .andExpect(jsonPath("$.totalPages").value(2));
     }
 
     @Test
-    void findByProject_noTasks_returnsEmptyArray() throws Exception {
-        when(taskService.findByProject(1L)).thenReturn(List.of());
+    void findByProject_noTasks_returnsEmptyPage() throws Exception {
+        when(taskService.findByProject(eq(1L), any(Pageable.class)))
+                .thenReturn(new PageResponseDto<>(Page.empty(PageRequest.of(0, 20))));
 
         mockMvc.perform(get("/api/projects/1/tasks"))
                 .andExpect(status().isOk())
-                .andExpect(content().json("[]"));
+                .andExpect(jsonPath("$.content").isEmpty())
+                .andExpect(jsonPath("$.totalElements").value(0));
+    }
+
+    @Test
+    void findByProject_noParameters_usesDefaultPageSizeAndSortById() throws Exception {
+        when(taskService.findByProject(eq(1L), any(Pageable.class)))
+                .thenReturn(new PageResponseDto<>(Page.empty(PageRequest.of(0, 20))));
+
+        mockMvc.perform(get("/api/projects/1/tasks"))
+                .andExpect(status().isOk());
+
+        Pageable pageable = capturePageable(1L);
+        assertThat(pageable.getPageNumber()).isZero();
+        assertThat(pageable.getPageSize()).isEqualTo(20);
+        assertThat(pageable.getSort()).isEqualTo(Sort.by("id"));
+    }
+
+    @Test
+    void findByProject_sortByDueDateDesc_passesSortToService() throws Exception {
+        when(taskService.findByProject(eq(1L), any(Pageable.class)))
+                .thenReturn(new PageResponseDto<>(Page.empty(PageRequest.of(1, 10))));
+
+        mockMvc.perform(get("/api/projects/1/tasks").param("page", "1").param("size", "10").param("sort", "dueDate,desc"))
+                .andExpect(status().isOk());
+
+        Pageable pageable = capturePageable(1L);
+        assertThat(pageable.getPageNumber()).isEqualTo(1);
+        assertThat(pageable.getPageSize()).isEqualTo(10);
+        assertThat(pageable.getSort()).isEqualTo(Sort.by(Sort.Direction.DESC, "dueDate"));
+    }
+
+    @Test
+    void findByProject_sizeAboveMaximum_isCappedAt100() throws Exception {
+        when(taskService.findByProject(eq(1L), any(Pageable.class)))
+                .thenReturn(new PageResponseDto<>(Page.empty(PageRequest.of(0, 100))));
+
+        mockMvc.perform(get("/api/projects/1/tasks").param("size", "500"))
+                .andExpect(status().isOk());
+
+        assertThat(capturePageable(1L).getPageSize()).isEqualTo(100);
+    }
+
+    @Test
+    void findByProject_invalidSortProperty_returnsBadRequest() throws Exception {
+        // with a mocked service the real query never runs, so the mock throws what Spring Data would throw
+        when(taskService.findByProject(eq(1L), any(Pageable.class)))
+                .thenThrow(new PropertyReferenceException("foo", TypeInformation.of(Task.class), List.of()));
+
+        mockMvc.perform(get("/api/projects/1/tasks").param("sort", "foo"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Invalid sort property 'foo'"));
     }
 
     @Test
@@ -350,6 +416,12 @@ class TaskControllerTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.status").value(404))
                 .andExpect(jsonPath("$.message").value("Task not found with id: 99"));
+    }
+
+    private Pageable capturePageable(Long projectId) {
+        ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
+        verify(taskService).findByProject(eq(projectId), captor.capture());
+        return captor.getValue();
     }
 
     private TaskRequestDto request(Long projectId) {

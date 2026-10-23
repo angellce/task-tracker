@@ -1,13 +1,13 @@
 package com.example.project1.service;
 
+import com.example.project1.dto.PageResponseDto;
 import com.example.project1.dto.ProjectRequestDto;
 import com.example.project1.dto.ProjectResponseDto;
 import com.example.project1.exception.ResourceNotFoundException;
 import com.example.project1.model.Project;
 import com.example.project1.repository.ProjectRepository;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
-
-import java.util.List;
 
 @Service
 public class ProjectService {
@@ -27,11 +27,8 @@ public class ProjectService {
         return new ProjectResponseDto(saved.getId(), saved.getName(), saved.getDescription(), saved.getCreatedAt());
     }
 
-    public List<ProjectResponseDto> findAll(){
-        return projectRepository.findAll()
-                .stream()
-                .map(this::toResponseDto)
-                .toList();
+    public PageResponseDto<ProjectResponseDto> findAll(Pageable pageable){
+        return new PageResponseDto<>(projectRepository.findAll(pageable).map(this::toResponseDto));
     }
 
     public ProjectResponseDto findById(Long id){
