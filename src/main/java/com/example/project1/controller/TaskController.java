@@ -1,12 +1,20 @@
 package com.example.project1.controller;
 
+import com.example.project1.dto.PageResponseDto;
+import com.example.project1.dto.TaskFilterDto;
 import com.example.project1.dto.TaskRequestDto;
 import com.example.project1.dto.TaskResponseDto;
+import com.example.project1.enumerations.TaskPriority;
+import com.example.project1.enumerations.TaskStatus;
 import com.example.project1.model.Task;
 import com.example.project1.service.TaskService;
+import jakarta.validation.Valid;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
+import java.time.LocalDate;
 
 @RestController
 public class TaskController {
@@ -18,14 +26,26 @@ public class TaskController {
     }
 
     @PostMapping("/api/projects/{projectId}/tasks")
-    public TaskResponseDto create(@PathVariable Long projectId, @RequestBody TaskRequestDto request){
+    public TaskResponseDto create(@PathVariable Long projectId, @Valid @RequestBody TaskRequestDto request){
         request.setProjectId(projectId);
         return taskService.create(request);
     }
 
     @GetMapping("/api/projects/{projectId}/tasks")
-    public List<TaskResponseDto> findByProject(@PathVariable Long projectId){
-        return taskService.findByProject(projectId);
+    public PageResponseDto<TaskResponseDto> findByProject(@PathVariable Long projectId,
+                                                          @PageableDefault(size = 20, sort = "id") Pageable pageable){
+        return taskService.findByProject(projectId, pageable);
+    }
+
+    @GetMapping("/api/tasks")
+    public PageResponseDto<TaskResponseDto> findAll(
+            @RequestParam(required = false) TaskStatus status,
+            @RequestParam(required = false) TaskPriority priority,
+            @RequestParam(required = false) Long projectId,
+            @RequestParam(required = false) String assignee,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dueBefore,
+            @PageableDefault(size = 20, sort = "id") Pageable pageable){
+        return taskService.findAll(new TaskFilterDto(status, priority, projectId, assignee, dueBefore), pageable);
     }
 
     @GetMapping("/api/tasks/{id}")
@@ -34,7 +54,7 @@ public class TaskController {
     }
 
     @PutMapping("/api/tasks/{id}")
-    public TaskResponseDto update(@PathVariable Long id, @RequestBody TaskRequestDto request){
+    public TaskResponseDto update(@PathVariable Long id, @Valid @RequestBody TaskRequestDto request){
         return taskService.update(id, request);
     }
 
